@@ -1,0 +1,127 @@
+import numpy as np
+import pandas as pd
+import seaborn as sns
+import matplotlib.pyplot as plt
+
+rng = np.random.default_rng(12580)
+d=10
+a=2
+v=300
+x_posi = rng.normal(size=(100,d))
+x_neg = rng.normal(size=(100,d))
+x_posi[:,0] *= np.sqrt(v)
+x_neg[:,0] *= np.sqrt(v)
+x_posi[:,1] += a
+x_neg[:,1] -= a
+splits = []
+error_pc1 = np.zeros(20)
+error_fisher = np.zeros(20)
+
+## seperate the simulated data into training data and test data
+for b in range(20):
+    train_posi = rng.choice(100, size=70, replace=False)
+    train_neg = rng.choice(100, size=70, replace=False)
+    test_posi = np.setdiff1d(np.arange(100), train_posi)
+    test_neg = np.setdiff1d(np.arange(100), train_neg)
+    x_train = np.vstack((x_posi[train_posi], x_neg[train_neg]))
+    y_train = np.concatenate((np.ones(70), -np.ones(70)))
+    x_test = np.vstack((x_posi[test_posi], x_neg[test_neg]))
+    y_test = np.concatenate((np.ones(30), -np.ones(30)))
+    splits.append({
+        "x_train": x_train,
+        "y_train": y_train,
+        "x_test": x_test,
+        "y_test": y_test,
+    })
+
+for b in range(20):
+    x_train = splits[b]["x_train"]
+    y_train = splits[b]["y_train"]
+    x_test = splits[b]["x_test"]
+    y_test = splits[b]["y_test"]
+    
+    train_mean = np.mean(x_train, axis=0)
+    x_train_centered = x_train - train_mean
+    x_test_centered = x_test - train_mean
+ 
+    x_plus = x_train[y_train == 1, :]
+    x_minus = x_train[y_train == -1, :]
+  
+    u_plus = np.mean(x_plus, axis=0)
+    u_minus = np.mean(x_minus, axis=0)
+
+    x_plus_c = x_plus - u_plus
+    x_minus_c = x_minus - u_minus
+
+    c_plus = x_plus_c.T @ x_plus_c / 70
+    c_minus = x_minus_c.T @ x_minus_c / 70
+
+    w_fisher = np.linalg.solve(c_plus + c_minus, u_plus - u_minus)
+    w_fisher = w_fisher / np.linalg.norm(w_fisher)
+
+    S = np.cov(x_train_centered, rowvar=False)
+
+    eigenvalues, eigenvectors = np.linalg.eigh(S)
+
+    w_pc1 = eigenvectors[:, -1]
+    w_pc1 = w_pc1 / np.linalg.norm(w_pc1)
+
+    # PC1
+    t_train_pc1 = x_train_centered @ w_pc1
+    t_test_pc1 = x_test_centered @ w_pc1
+
+    m_plus_pc1 = np.mean(t_train_pc1[y_train == 1])
+    m_minus_pc1 = np.mean(t_train_pc1[y_train == -1])
+
+    y_hat_pc1 = np.where((m_plus_pc1 - m_minus_pc1)
+    * (t_test_pc1 - (m_plus_pc1 + m_minus_pc1) / 2) > 0,1,-1)
+
+    error_pc1[b] = np.mean(y_hat_pc1 != y_test)
+
+    # Fisher
+    t_train_fisher = x_train_centered @ w_fisher
+    t_test_fisher = x_test_centered @ w_fisher
+
+    m_plus_fisher = np.mean(t_train_fisher[y_train == 1])
+    m_minus_fisher = np.mean(t_train_fisher[y_train == -1])
+
+    y_hat_fisher = np.where(
+        (m_plus_fisher - m_minus_fisher)
+        * (t_test_fisher - (m_plus_fisher + m_minus_fisher) / 2) > 0,
+        1,-1)
+    
+    error_fisher[b] = np.mean(y_hat_fisher != y_test)
+
+mean_pc1 = np.mean(error_pc1)
+sd_pc1 = np.std(error_pc1, ddof=1)
+
+mean_fisher = np.mean(error_fisher)
+sd_fisher = np.std(error_fisher, ddof=1)
+
+print(mean_pc1, sd_pc1, mean_fisher, sd_fisher)
+
+error_df = pd.DataFrame({
+    "Method": ["PC1"] * 20 + ["Fisher"] * 20,
+    "Error": np.concatenate([error_pc1, error_fisher])
+})
+
+sns.boxplot(
+    data=error_df,
+    x="Method",
+    y="Error",
+    showfliers=False
+)
+
+sns.stripplot(
+    data=error_df,
+    x="Method",
+    y="Error",
+    jitter=0.1,
+    color="black",
+    alpha=0.7
+)
+
+plt.xlabel("Method")
+plt.ylabel("Test Classification Error")
+plt.title("Test Error Across 20 Stratified Splits")
+plt.show()
