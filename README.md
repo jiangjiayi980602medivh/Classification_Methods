@@ -1,4 +1,4 @@
-# Wind in the Street
+# Classification Methods
 
 In this project, we will talk about different ways of separate different dataset into different types according different data features.
 
